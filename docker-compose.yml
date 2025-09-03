@@ -10,7 +10,7 @@ services:
       - .:/usr/src/app
     command: npm run start:dev
     ports:
-      - 3000:3000
+      - 3001:3000
     environment:
       ATC_BASE_URL: http://mock:4000
   mock:

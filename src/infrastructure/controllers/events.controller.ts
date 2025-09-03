@@ -1,5 +1,7 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Body, Controller, Inject, Post } from '@nestjs/common';
 import { EventBus } from '@nestjs/cqrs';
+import { Cache } from 'cache-manager';
 import { UseZodGuard } from 'nestjs-zod';
 import { z } from 'nestjs-zod/z';
 
@@ -43,13 +45,23 @@ export type ExternalEventDTO = z.infer<typeof ExternalEventSchema>;
 
 @Controller('events')
 export class EventsController {
-  constructor(private eventBus: EventBus) {}
+  constructor(
+    private eventBus: EventBus,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
+  ) {}
 
   @Post()
   @UseZodGuard('body', ExternalEventSchema)
   async receiveEvent(@Body() externalEvent: ExternalEventDTO) {
+    const today = new Date();
+    const formattedToday = today.toISOString().split('T')[0];
+
     switch (externalEvent.type) {
       case 'booking_created':
+        this.cacheManager.del(`clubId-${externalEvent.clubId}-courts`);
+        this.cacheManager.del(
+          `clubId-${externalEvent.clubId}-courts-${externalEvent.courtId}-date-${formattedToday}-slots`,
+        );
         this.eventBus.publish(
           new SlotBookedEvent(
             externalEvent.clubId,
@@ -59,6 +71,10 @@ export class EventsController {
         );
         break;
       case 'booking_cancelled':
+        this.cacheManager.del(`clubId-${externalEvent.clubId}-courts`);
+        this.cacheManager.del(
+          `clubId-${externalEvent.clubId}-courts-${externalEvent.courtId}-date-${formattedToday}-slots`,
+        );
         this.eventBus.publish(
           new SlotAvailableEvent(
             externalEvent.clubId,
@@ -68,11 +84,17 @@ export class EventsController {
         );
         break;
       case 'club_updated':
+        if (externalEvent.fields && externalEvent.fields['openhours']) {
+          this.cacheManager.reset();
+        } else {
+          this.cacheManager.del(`clubId-${externalEvent.clubId}-courts`);
+        }
         this.eventBus.publish(
           new ClubUpdatedEvent(externalEvent.clubId, externalEvent.fields),
         );
         break;
       case 'court_updated':
+        this.cacheManager.del(`clubId-${externalEvent.clubId}-courts`);
         this.eventBus.publish(
           new CourtUpdatedEvent(
             externalEvent.clubId,
